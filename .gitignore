@@ -1,0 +1,9 @@
+node_modules/
+dist/
+.env
+*.log
+.DS_Store
+coverage/
+.claude/
+.vite/
+SyncPad_Study_Guide.*
