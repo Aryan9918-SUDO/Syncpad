@@ -10,6 +10,7 @@ const {
   getCollaborators,
   removeCollaborator,
   searchUsers,
+  createWSTicket,
 } = require('../controllers/documents');
 
 const router = Router();
@@ -25,5 +26,6 @@ router.delete('/:id', deleteDocument);
 router.post('/:id/collaborators', addCollaborator);
 router.get('/:id/collaborators', getCollaborators);
 router.delete('/:id/collaborators/:userId', removeCollaborator);
+router.post('/:id/ws-ticket', createWSTicket);
 
 module.exports = router;

@@ -5,8 +5,8 @@
   "scripts": {
     "start": "node src/app.js",
     "dev": "nodemon src/app.js",
-    "test": "jest --forceExit --detectOpenHandles",
-    "test:coverage": "jest --forceExit --detectOpenHandles --coverage",
+    "test": "DATABASE_URL=${DATABASE_URL:-postgresql://postgres:postgres@localhost:5432/syncpad_test} JWT_SECRET=${JWT_SECRET:-test-secret-key} jest --forceExit --detectOpenHandles --runInBand",
+    "test:coverage": "DATABASE_URL=${DATABASE_URL:-postgresql://postgres:postgres@localhost:5432/syncpad_test} JWT_SECRET=${JWT_SECRET:-test-secret-key} jest --forceExit --detectOpenHandles --runInBand --coverage",
     "lint": "eslint src/ tests/",
     "db:init": "node src/config/init-db.js"
   },
@@ -19,6 +19,8 @@
     "cors": "^2.8.6",
     "dotenv": "^17.4.2",
     "express": "^5.2.1",
+    "express-rate-limit": "^8.7.3",
+    "helmet": "^8.3.0",
     "jsonwebtoken": "^9.0.3",
     "lib0": "^0.2.99",
     "morgan": "^1.10.1",

@@ -4,25 +4,26 @@
 
 ![CI](https://img.shields.io/badge/CI-passing-brightgreen)
 ![Node](https://img.shields.io/badge/Node.js-18%2B-339933?logo=node.js)
-![Tests](https://img.shields.io/badge/tests-24%20passing-brightgreen)
+![Tests](https://img.shields.io/badge/tests-75%20passing-brightgreen)
 ![ESLint](https://img.shields.io/badge/ESLint%209-passing-4B32C3?logo=eslint)
 ![License](https://img.shields.io/badge/license-MIT-blue)
 
 **Author:** [Aryan Kumar Singh](https://github.com/Aryan9918-SUDO)
 
-**Stack:** Node.js 18, Express 5, PostgreSQL 15, Yjs (CRDT), CodeMirror 6, React 18, Vite 5, WebSocket (ws), JWT + bcryptjs, Jest 29, Supertest, ESLint 9 (flat config), GitHub Actions, Docker Compose
+**Stack:** Node.js 18, Express 5, PostgreSQL 15, Yjs (CRDT), CodeMirror 6, React 18, Vite 5, WebSocket (ws), JWT + bcryptjs, Helmet, express-rate-limit, Jest 29, Supertest, ESLint 9 (flat config), GitHub Actions, Docker Compose
 
 ---
 
 ## Highlights (why this is more than a demo)
 
-- **Production-grade CRDT sync** — not a toy WebSocket broadcast; uses the full Yjs protocol (sync + awareness) with binary-encoded state vectors, incremental updates, and client-server state reconciliation
+- **Production-grade CRDT sync** — not a toy WebSocket broadcast; uses the full Yjs protocol (sync + awareness) with binary-encoded state vectors, incremental updates, and client-server state reconciliation. Updates are broadcast to all connected peers in real time
 - **Custom Yjs server** — hand-built on top of `y-protocols` and `lib0`, not a wrapper around `y-websocket-server`. Shares the same HTTP port as Express, enables per-document access control, and handles connection lifecycle (join, sync, disconnect, cleanup)
 - **Persistent CRDT state** — Yjs documents serialize to PostgreSQL as `BYTEA` with a 2-second debounced write + flush-on-idle. New clients load the full document state from DB, so content survives server restarts and zero-client windows
 - **Hot language switching** — CodeMirror 6 compartments allow reconfiguring the syntax mode (JS, Python, HTML, CSS, JSON) without destroying and rebuilding the editor state or losing cursor position
-- **Awareness protocol** — live cursor positions, selections, and user identity broadcast to all peers via the Yjs awareness channel. Each user gets a deterministic color based on their username hash
-- **Software engineering practices** — 24 integration tests hitting a real database (not mocks), ESLint 9 flat config, GitHub Actions CI with 3 parallel jobs (lint, test with Postgres service container, client production build)
-- **Full auth + sharing flow** — JWT register/login, document CRUD, owner-managed collaborator list with user search, role-based access checks on every API endpoint
+- **Awareness protocol** — live cursor positions, selections, and server-verified user identity broadcast to all peers via the Yjs awareness channel. Each user gets a deterministic color based on their username hash
+- **Software engineering practices** — 75 integration tests (REST + WebSocket) hitting a real database (not mocks) with test-database safety guard, ESLint 9 flat config, GitHub Actions CI with 3 parallel jobs (lint, test with Postgres service container, client production build)
+- **Full auth + sharing flow** — JWT register/login with input validation, document CRUD, owner-managed collaborator list with user search, role-based access control (owner/editor/viewer) enforced on both REST and WebSocket
+- **Security hardened** — single-use WebSocket tickets (no credentials in query strings), DB-revalidated permissions on each connection, active connection invalidation on collaborator removal or demotion, Helmet security headers, rate limiting on auth endpoints, CORS configuration, role-based write protection at the CRDT protocol level
 
 ---
 
@@ -145,7 +146,8 @@ sequenceDiagram
 | Sync Protocol | y-protocols, lib0 | Binary encoding/decoding for Yjs sync and awareness messages |
 | Database | PostgreSQL 15 | Users, documents, collaborators, serialized CRDT state |
 | Auth | jsonwebtoken + bcryptjs | JWT token signing/verification, password hashing |
-| Testing | Jest 29 + Supertest 7 | Integration tests against real PostgreSQL |
+| Security | Helmet + express-rate-limit + cors | HTTP headers, brute-force protection, origin control |
+| Testing | Jest 29 + Supertest 7 | 75 integration tests (REST + WebSocket) against real PostgreSQL |
 | Linting | ESLint 9 (flat config) | Code quality with unused-var patterns for catch/args |
 | CI/CD | GitHub Actions | 3 parallel jobs: lint, test (with Postgres service), client build |
 | Containerization | Docker Compose | PostgreSQL service for local development |
@@ -161,8 +163,11 @@ sequenceDiagram
 | Multi-language syntax | CodeMirror 6 language packages (JS, Python, HTML, CSS, JSON) |
 | Hot language switching | CodeMirror Compartment reconfiguration without editor rebuild |
 | Document persistence | Yjs state → `BYTEA` in PostgreSQL (2s debounce + flush on idle) |
-| User authentication | JWT register/login, bcrypt password hashing, token-gated routes |
-| Document sharing | Owner adds/removes collaborators by searching users, role-based access |
+| User authentication | JWT register/login with input validation, bcrypt password hashing, token-gated routes |
+| Document sharing | Owner adds/removes collaborators by searching users, role-based access (owner/editor/viewer) |
+| WebSocket auth | Single-use ticket validated on WebSocket upgrade with DB permission revalidation; active connections closed on collaborator removal, live role demotion on permission changes |
+| RBAC enforcement | Viewers receive real-time sync but cannot modify documents; enforced at protocol level |
+| Security headers | Helmet for HTTP headers, rate limiting on auth endpoints, configurable CORS |
 | Dark theme | Catppuccin Mocha-inspired palette with CodeMirror One Dark |
 
 ---
@@ -236,11 +241,21 @@ Start the server: `cd server && npm run dev`
 | GET | `/api/documents/:id/collaborators` | Bearer | — | Array of collaborators |
 | DELETE | `/api/documents/:id/collaborators/:userId` | Bearer | — | 204 No Content |
 
-### WebSocket
+### WebSocket Tickets
+
+| Method | Endpoint | Auth | Response |
+|--------|----------|------|----------|
+| POST | `/api/documents/:id/ws-ticket` | Bearer | `{ticket}` — single-use, 30-second TTL |
+
+WebSocket connections require a single-use ticket obtained via the REST API. The ticket is consumed on the upgrade and the server revalidates the user's current permissions against the database, so stale tickets cannot preserve revoked access.
 
 | Endpoint | Protocol | Description |
 |----------|----------|-------------|
-| `ws://localhost:3001/yjs/:documentId` | Yjs sync + awareness | Binary CRDT sync channel |
+| `ws://localhost:3001/yjs/:documentId?ticket=TICKET` | Yjs sync + awareness | Authenticated binary CRDT sync channel. Requires a valid single-use ticket. Viewers receive sync but cannot write |
+
+### Collaborator Revocation
+
+When a collaborator is **removed**, the server immediately closes their active WebSocket connections (close code 4403) and invalidates any outstanding tickets. When a collaborator is **demoted** (e.g., editor to viewer), their active connections are updated in place — write operations are blocked immediately without requiring a reconnect.
 
 ### Example: Register + Create Document + Connect
 
@@ -259,8 +274,12 @@ curl -s -X POST http://localhost:3001/api/documents \
   -d '{"title":"My First Doc","language":"javascript"}'
 # → {"id":"...","title":"My First Doc","language":"javascript","owner_id":"..."}
 
+# Get a WebSocket ticket
+TICKET=$(curl -s -X POST http://localhost:3001/api/documents/<doc-id>/ws-ticket \
+  -H "Authorization: Bearer $TOKEN" | jq -r '.ticket')
+
 # Connect to the CRDT sync channel (use wscat or the browser client)
-# wscat -c ws://localhost:3001/yjs/<document-id>
+# wscat -c "ws://localhost:3001/yjs/<document-id>?ticket=$TICKET"
 ```
 
 ---
@@ -303,7 +322,8 @@ Open `http://localhost:5173` — register an account, create a document, start t
 |----------|---------|-------------|
 | `PORT` | `3001` | Express server port |
 | `DATABASE_URL` | — | PostgreSQL connection string (e.g., `postgresql://postgres:postgres@localhost:5432/syncpad`) |
-| `JWT_SECRET` | — | Secret key for signing/verifying JWT tokens. Use a random string in production |
+| `JWT_SECRET` | — | **Required.** Secret key for signing/verifying JWT tokens. Must be set; server exits with error in production if missing |
+| `CORS_ORIGIN` | — | Comma-separated list of allowed origins (e.g., `http://localhost:5173`). Omit for permissive CORS in development |
 
 See [`server/.env.example`](server/.env.example) for a working local configuration.
 
@@ -328,18 +348,23 @@ docker run -d --name syncpad-pg \
 
 ## Testing, Quality & CI
 
-### Tests (24 integration tests, real PostgreSQL)
+### Tests (75 integration tests, real PostgreSQL, test-database safety guard)
 
 ```bash
 cd server
-npm test                 # Run all tests
+npm test                 # Run all tests sequentially (against test DB)
 npm run test:coverage    # With coverage report
 ```
 
+Tests require a dedicated test database (`syncpad_test`). The test setup refuses to run against any database whose connection string does not contain `syncpad_test`. Set `DATABASE_URL` in your environment or let the default (port 5432) apply.
+
 | Suite | Tests | What's covered |
 |-------|-------|----------------|
-| `auth.test.js` | 9 | Register (success, duplicate, missing fields), Login (success, wrong password, non-existent), Profile (valid token, missing token, invalid token) |
-| `documents.test.js` | 15 | Create (with values, defaults, unauth), List, Get (found, 404), Update (title, language), Delete (success, already deleted), Add/list/remove collaborators, User search |
+| `auth.test.js` | 12 | Register (success, duplicate, missing fields, invalid email, short password, invalid username), Login (success, wrong password, non-existent), Profile (valid token, missing token, invalid token) |
+| `documents.test.js` | 27 | Create (with values, defaults, unauth, invalid language), List, Get (found, 404, invalid UUID), Update (title, language, invalid language), Delete (success, already deleted), Add collaborator (success, invalid role), List collaborators (owner, collaborator, denied to outsider), Editor cannot update metadata, Viewer cannot update metadata, Roles, User search, Remove collaborator, WS ticket (issue, reject unauth, reject no auth) |
+| `yjs.test.js` | 36 | WebSocket auth (no ticket, bad ticket, invalid UUID, owner/editor/viewer accept), Ticket auth (valid, consumed, wrong doc), Sync protocol (SyncStep1, broadcast, bidirectional, convergence), Awareness (cursors, spoofed identity), RBAC (viewer sync, viewer blocked, role in API), Late joiner, Persistence (save+reload, restart simulation), Y.Doc sharing, Cleanup race, DB failure retention, Doc deletion, Connection invalidation (removal, demotion, role-change notification demote/promote, stale ticket after removal, stale ticket after demotion), Orphan timeout (backoff retry with DB recovery, deliberate deletion cleanup), Awareness hardening (malformed JSON, non-object user, non-object state) |
+
+**Note on the restart test:** The "content survives backend restart" test simulates a restart by destroying the in-memory Y.Doc and reloading from the database. It does not stop and restart the Node.js process.
 
 ### Linting
 
@@ -391,11 +416,14 @@ SyncPad/
 │   │   │   ├── auth.js                  # POST register/login, GET me
 │   │   │   └── documents.js             # Full document + collaborator routes
 │   │   ├── services/
-│   │   │   └── yjs-server.js            # Core: Yjs sync protocol, awareness, DB load/save
-│   │   └── app.js                       # Express app + HTTP server + WebSocket upgrade handler
+│   │   │   ├── yjs-server.js            # Core: Yjs sync protocol, awareness, DB load/save
+│   │   │   └── ticket-store.js          # Single-use WebSocket ticket store (30s TTL)
+│   │   └── app.js                       # Express app + Helmet + rate limiting + WebSocket auth upgrade
 │   ├── tests/
-│   │   ├── auth.test.js                 # 9 auth integration tests
-│   │   └── documents.test.js            # 15 document + collab integration tests
+│   │   ├── setup.js                     # Test DB safety guard + reset helper
+│   │   ├── auth.test.js                 # 12 auth integration tests (incl. validation)
+│   │   ├── documents.test.js            # 27 document + collab + RBAC + ticket integration tests
+│   │   └── yjs.test.js                  # 36 WebSocket + Yjs sync + persistence + invalidation tests
 │   ├── .env.example                     # Template env vars
 │   ├── eslint.config.js                 # ESLint 9 flat config with Jest globals
 │   └── package.json                     # Express, Yjs, ws, pg, Jest, Supertest deps
@@ -410,8 +438,6 @@ SyncPad/
 
 ## Known Limits
 
-- **No authentication on WebSocket** — the `/yjs/:docId` channel currently accepts any connection. Production would need token validation on the upgrade request before establishing the sync
-- **No rate limiting** — API endpoints are unprotected against brute-force login or document spam
 - **Single-server only** — the in-memory `Map<docId, Y.Doc>` doesn't synchronize across multiple server instances. Horizontal scaling would need Redis pub/sub or a shared Yjs persistence layer
 - **No undo/redo across sessions** — Yjs undo manager is per-client and not persisted. Closing and reopening a document starts a fresh undo stack
 - **Client bundle size** — CodeMirror 6 + Yjs + 5 language packs produce an ~870 KB bundle. Code splitting with dynamic imports would reduce initial load

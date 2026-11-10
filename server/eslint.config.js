@@ -14,10 +14,12 @@ module.exports = [
         __dirname: 'readonly',
         Buffer: 'readonly',
         URL: 'readonly',
+        Uint8Array: 'readonly',
         setTimeout: 'readonly',
         clearTimeout: 'readonly',
         setInterval: 'readonly',
         clearInterval: 'readonly',
+        fetch: 'readonly',
       },
     },
     rules: {

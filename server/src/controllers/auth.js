@@ -2,10 +2,26 @@ const bcrypt = require('bcryptjs');
 const pool = require('../config/db');
 const { signToken } = require('../middleware/auth');
 
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const USERNAME_RE = /^[a-zA-Z0-9_-]{2,50}$/;
+const MIN_PASSWORD_LENGTH = 6;
+
 async function register(req, res) {
   const { username, email, password } = req.body;
   if (!username || !email || !password) {
     return res.status(400).json({ error: 'All fields required' });
+  }
+
+  if (!USERNAME_RE.test(username)) {
+    return res.status(400).json({ error: 'Username must be 2-50 characters (letters, numbers, _ -)' });
+  }
+
+  if (!EMAIL_RE.test(email) || email.length > 255) {
+    return res.status(400).json({ error: 'Invalid email format' });
+  }
+
+  if (password.length < MIN_PASSWORD_LENGTH || password.length > 128) {
+    return res.status(400).json({ error: `Password must be ${MIN_PASSWORD_LENGTH}-128 characters` });
   }
 
   try {

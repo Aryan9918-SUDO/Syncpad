@@ -1,11 +1,10 @@
 const request = require('supertest');
 const { app } = require('../src/app');
 const pool = require('../src/config/db');
+const { resetDatabase } = require('./setup');
 
 beforeAll(async () => {
-  await pool.query('DELETE FROM document_collaborators');
-  await pool.query('DELETE FROM documents');
-  await pool.query('DELETE FROM users');
+  await resetDatabase();
 });
 
 afterAll(async () => {
@@ -37,6 +36,33 @@ describe('POST /api/auth/register', () => {
       .send({ username: 'bob' });
 
     expect(res.status).toBe(400);
+  });
+
+  it('rejects invalid email format', async () => {
+    const res = await request(app)
+      .post('/api/auth/register')
+      .send({ username: 'charlie', email: 'not-an-email', password: 'pass123' });
+
+    expect(res.status).toBe(400);
+    expect(res.body.error).toMatch(/email/i);
+  });
+
+  it('rejects short password', async () => {
+    const res = await request(app)
+      .post('/api/auth/register')
+      .send({ username: 'charlie', email: 'charlie@test.com', password: '12' });
+
+    expect(res.status).toBe(400);
+    expect(res.body.error).toMatch(/password/i);
+  });
+
+  it('rejects invalid username characters', async () => {
+    const res = await request(app)
+      .post('/api/auth/register')
+      .send({ username: 'bad user!', email: 'bad@test.com', password: 'pass123' });
+
+    expect(res.status).toBe(400);
+    expect(res.body.error).toMatch(/username/i);
   });
 });
 
